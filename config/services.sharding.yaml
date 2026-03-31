@@ -1,0 +1,92 @@
+# Services Symfony - Exemple d'intégration du système de sharding
+# 
+# À placer dans config/services.yaml ou un fichier imports
+# 
+# Note: Pour un projet réel, charger les credentials depuis .env pour sécurité
+
+services:
+  # ========== CONFIGURATION DES SHARDS ==========
+  
+  sharding.shard_definitions:
+    class: ArrayObject
+    arguments:
+      - 
+        shard_1:
+          class: App\Sharding\Storage\ShardDefinition
+          arguments:
+            - 'shard_1'
+            - 'db1.internal.example.com'
+            - 5432
+            - 'sharding_db'
+            - '%env(DB_USER)%'
+            - '%env(DB_PASSWORD)%'
+        shard_2:
+          class: App\Sharding\Storage\ShardDefinition
+          arguments:
+            - 'shard_2'
+            - 'db2.internal.example.com'
+            - 5432
+            - 'sharding_db'
+            - '%env(DB_USER)%'
+            - '%env(DB_PASSWORD)%'
+        shard_3:
+          class: App\Sharding\Storage\ShardDefinition
+          arguments:
+            - 'shard_3'
+            - 'db3.internal.example.com'
+            - 5432
+            - 'sharding_db'
+            - '%env(DB_USER)%'
+            - '%env(DB_PASSWORD)%'
+
+  sharding.config:
+    class: App\Sharding\Config\ShardConfig
+    arguments:
+      - 1  # version
+      - !tagged_locator { tag: 'sharding.shard_definition' }  # liste des shards
+      - 150  # virtualNodes
+
+  # ========== GESTIONNAIRES ==========
+
+  App\Sharding\Config\ShardConfigManager:
+    calls:
+      - initializeWithCurrentConfig: ['@sharding.config']
+
+  App\Sharding\Storage\ShardConnectionManager:
+    arguments:
+      - '@sharding.config'
+
+  # ========== HASH RING ==========
+
+  App\Sharding\HashRing:
+    calls:
+      - addShard: ['shard_1']
+      - addShard: ['shard_2']
+      - addShard: ['shard_3']
+
+  # ========== ROUTEUR ==========
+
+  App\Sharding\ShardRouter:
+    arguments:
+      - '@App\Sharding\Config\ShardConfigManager'
+      - '@App\Sharding\Storage\ShardConnectionManager'
+      - '@logger'  # Optionnel: logger Monolog Symfony
+
+  # ========== SERVICES DE MIGRATION ==========
+
+  App\Sharding\Migration\MigrationThroughService:
+    arguments:
+      - '@App\Sharding\ShardRouter'
+      - '@logger'
+
+  App\Sharding\Migration\MigrationWorkerService:
+    factory: ['@=service("App\\Sharding\\Migration\\MigrationWorkerService")']
+    # Service factory pour injection flexible
+    # Utiliser dans comando/service avec:
+    #   $worker = new MigrationWorkerService(
+    #       $connectionManager,
+    #       'shard_1_old',
+    #       'shard_1_new',
+    #       $logger,
+    #       500  # batchSize
+    #   );
